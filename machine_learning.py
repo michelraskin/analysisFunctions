@@ -36,7 +36,7 @@ DefaultGrid = [
     'clf__class_weight': [None, 'balanced']
   },
   {
-    'clf': [LogisticRegression(penalty='l1'), SVC(probability=True, kernel='linear')],
+    'clf': [LogisticRegression(), SVC(probability=True, kernel='linear')],
     'clf__C': [0.1, 1, 10]
   }
 ]
@@ -81,7 +81,7 @@ def getTopFeatures(aGridSearch, aColumnNames):
   sns.barplot(x = 'Importance', y= 'Feature', data=myTopFeatures)
   plt.title(f'Importances for {aGridSearch.best_params_}')
 
-def plotRocAucCuve(aGridSearchCv, y_test):
+def plotRocAucCuve(aGridSearchCv, X_test, y_test):
   myBestModel = aGridSearchCv.best_estimator_
   y_pred_proba = myBestModel.predict_proba(X_test)[:, 1]
   myFpr, myTpr, myThresholds = roc_curve(y_test, y_pred_proba)
@@ -95,6 +95,6 @@ def plotRocAucCuve(aGridSearchCv, y_test):
   plt.xlabel('False positive rate')
   plt.ylabel('True Positive Rate')
   plt.legend(loc='lower right')
-  plt.title(f'ROC Curve for {myGridSearchCv.best_params_}')
+  plt.title(f'ROC Curve for {aGridSearchCv.best_params_}')
   plt.show()
 
