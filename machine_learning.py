@@ -24,6 +24,10 @@ from sklearn import tree
 from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
 from sklearn.svm import SVC, SVR
 import re
+from sklearn.inspection import permutation_importance
+import statsmodels.api as sm
+import statsmodels.formula.api as smf
+from scipy.stats import chi2
 
 DefaultGrid = [
   {
@@ -42,19 +46,26 @@ DefaultGrid = [
   }
 ]
 
-def gridSearchKFoldClassification(X_train, X_test, y_train, y_test, aScore = 'roc_auc', aGrid = DefaultGrid, aPreprocessor = None, aNumericalColumns = None):
-  kf = StratifiedKFold(n_splits=10, shuffle=True)
-  
-  myPreprocessor = aPreprocessor
-  if aPreprocessor is None:
-    myPreprocessor = ColumnTransformer(
+def getDefaultPreprocessor(aNumericalColumns, aBinaryColumns):
+  return  ColumnTransformer(
       transformers=[
         ('num', StandardScaler(), aNumericalColumns), 
+        ('bin', 'passthrough', aBinaryColumns), 
       ],
-      remainder='passthrough'
+      remainder = OneHotEncoder(handle_unknown='ignore')
     )
-  
-  myPipeline = Pipeline([('preprocessor', myPreprocessor), ('imputer', SimpleImputer(missing_values=np.nan, strategy='mean')), ('clf', XGBClassifier())])
+
+def getDefaultPipelineSteps(X_train):
+  myNumericalColumns = X_train.columns[X_train.nunique() > 10]
+  myBinaryColumns = X_train.columns[X_train.nunique() == 2]
+  myPreprocessor = getDefaultPreprocessor(aNumericalColumns=myNumericalColumns, aBinaryColumns=myBinaryColumns)
+  return [('preprocessor', myPreprocessor), ('imputer', SimpleImputer(missing_values=np.nan, strategy='mean'))]
+
+def gridSearchKFoldClassification(X_train, X_test, y_train, y_test, aScore = 'roc_auc', aGrid = DefaultGrid):
+  kf = StratifiedKFold(n_splits=10, shuffle=True)
+  myPipelineSteps = getDefaultPipelineSteps(X_train = X_train)
+  myPipelineSteps.append(('clf', XGBClassifier()))
+  myPipeline = Pipeline(myPipelineSteps)
   myGridSearchCv = GridSearchCV(myPipeline, aGrid, cv=kf, scoring=aScore, n_jobs=-1, verbose=0)
   myGridSearchCv.fit(X_train, y_train)
   myBestModel = myGridSearchCv.best_estimator_
@@ -66,12 +77,16 @@ def gridSearchKFoldClassification(X_train, X_test, y_train, y_test, aScore = 'ro
   print(f'Accuracy score on test set is {accuracy_score(y_test, y_pred):.4f}')
   return myGridSearchCv
 
-def getTopFeatures(aGridSearch, aColumnNames):
+def getTopFeatures(aGridSearch, aColumnNames, X_train= None, y_train = None):
   myBestModel = aGridSearch.best_estimator_
   if hasattr(myBestModel.named_steps['clf'], 'coef_'):
     myImportances = myBestModel.named_steps['clf'].coef_[0]
-  else:
+  elif hasattr(myBestModel.named_steps['clf'], 'feature_importances_'):
     myImportances = myBestModel.named_steps['clf'].feature_importances_
+  else: 
+    myImportances = permutation_importance(myBestModel, X_train, y_train).importances_mean
+    aColumnNames = X_train.columns
+  
   myFeatureImportancesDf = pd.DataFrame({
     'Feature': aColumnNames,
     'Importance': myImportances
@@ -99,19 +114,12 @@ DefaulGridRegression = [
   }
 ]
 
-def gridSearchKFoldRegression(X_train, X_test, y_train, y_test, aScore = 'r2', aGrid = DefaulGridRegression, aPreprocessor = None, aNumericalColumns = None):
+def gridSearchKFoldRegression(X_train, X_test, y_train, y_test, aScore = 'r2', aGrid = DefaulGridRegression):
   kf = StratifiedKFold(n_splits=5, shuffle=True)
   
-  myPreprocessor = aPreprocessor
-  if aPreprocessor is None:
-    myPreprocessor = ColumnTransformer(
-      transformers=[
-        ('num', StandardScaler(), aNumericalColumns),
-      ],
-      remainder='passthrough'
-    )
-  
-  myPipeline = Pipeline([('preprocessor', myPreprocessor), ('imputer', SimpleImputer(missing_values=np.nan, strategy='mean')), ('clf', XGBClassifier())])
+  myPipelineSteps = getDefaultPipelineSteps(X_train=X_train)
+  myPipelineSteps.append(('clf', XGBRegressor()))
+  myPipeline = Pipeline(myPipelineSteps)
   myGridSearchCv = GridSearchCV(myPipeline, aGrid, cv=kf, scoring=aScore, n_jobs=-1, verbose=0)
   myGridSearchCv.fit(X_train, y_train)
   myBestModel = myGridSearchCv.best_estimator_
@@ -138,3 +146,70 @@ def plotRocAucCuve(aGridSearchCv, X_test, y_test):
   plt.title(f'ROC Curve for {aGridSearchCv.best_params_}')
   plt.show()
 
+def getPredictedThirds(aDf):
+  lower_third = aDf['predicted_effect'].quantile(1/3)
+  upper_third = aDf['predicted_effect'].quantile(2/3)
+  if upper_third == lower_third:
+    print(f'No effect difference')
+    return 1, 1, aDf
+  aDf['predicted_effect_group'] = pd.cut(
+    aDf['predicted_effect'],
+    bins=[-float('inf'), lower_third, upper_third, float('inf')],
+    labels=['Lower', 'Middle', 'Upper']
+  )
+  return lower_third, upper_third, aDf
+
+def getPredictedTreatmentEffectSupervised(X_train, aModel):
+  myXValueModified1 = X_train.copy()
+  myXValueModified1['groupe'] = 1.0
+  myXValueModified2 = X_train.copy()
+  myXValueModified2['groupe'] = 0.0
+  y_pred_proba1 = aModel.predict(myXValueModified1)
+  y_pred_proba2 = aModel.predict(myXValueModified2)
+  myNewDf = pd.DataFrame()
+  myNewDf['predicted_effect'] = (y_pred_proba1 - y_pred_proba2)
+  lower_third, upper_third, myNewDf = getPredictedThirds(myNewDf)
+  if lower_third == upper_third:
+    plt.scatter(x = range(len(y_pred_proba1)), y = myNewDf['predicted_effect'].sort_values())
+  else:
+    myNewDf.sort_values(['predicted_effect'], inplace=True)
+    myNewDf.reset_index(inplace=True)
+    for group in myNewDf['predicted_effect_group']:
+      myFilter = myNewDf['predicted_effect_group'] == group
+      plt.scatter(x = myNewDf[myFilter]['predicted_effect'].index, y = myNewDf[myFilter]['predicted_effect'])
+    plt.legend(myNewDf['predicted_effect_group'].unique())
+  return myNewDf
+
+def getTreatmentEffectDiff(X_train, y_train, aModel):
+  myNewDf = getPredictedTreatmentEffectSupervised(X_train, aModel)
+  lower_third = myNewDf['predicted_effect'].quantile(1/3)
+  upper_third = myNewDf['predicted_effect'].quantile(2/3)
+  if upper_third == lower_third:
+    print(f'No effect difference')
+    return 1
+  myNewDf['predicted_effect_third'] = pd.cut(
+    myNewDf['predicted_effect'],
+    bins=[-float('inf'), lower_third, upper_third, float('inf')],
+    labels=['Lower', 'Middle', 'Upper']
+  )
+
+  myData = pd.concat([X_train['groupe'], myNewDf['predicted_effect_third'], y_train], axis=1)
+  model1 = smf.logit(
+    'CPC12 ~ predicted_effect_third + groupe',
+    data=myData
+  ).fit()
+
+  model2 = smf.logit(
+    'CPC12 ~ predicted_effect_third * groupe',
+    data=myData
+  ).fit()
+
+  llr = -2*(model1.llf - model2.llf)
+  df_diff = model2.df_model - model1.df_model
+  p_value = chi2.sf(llr, df_diff)
+
+  print(f'Likelihood ratio of test results:')
+  print(f'Chi square statistic: {llr}')
+  print(f'p-value: {p_value}')
+  print(f'Degress of freedom: {df_diff}')
+  return p_value
