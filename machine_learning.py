@@ -7,21 +7,22 @@ from scipy import stats
 import statsmodels.api as sm
 from statsmodels.formula.api import ols
 from statsmodels.stats.multicomp import pairwise_tukeyhsd
-from analysisFunctions.analysis_functions import *
+from analysis_functions import *
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.compose import ColumnTransformer
 from sklearn.metrics import accuracy_score, roc_auc_score, make_scorer, auc, roc_curve
 from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score, GridSearchCV
 from xgboost import XGBClassifier, XGBRegressor, plot_tree, plot_importance, to_graphviz
 from sklearn.pipeline import Pipeline
-from sklearn.neighbors import KNeighborsClassifier
+from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 from sklearn.linear_model import LogisticRegression
 from sklearn.impute import SimpleImputer
 from sklearn.tree import DecisionTreeClassifier
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from graphviz import Source
 from sklearn import tree
-from sklearn.svm import SVC
+from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
+from sklearn.svm import SVC, SVR
 import re
 
 DefaultGrid = [
@@ -48,21 +49,21 @@ def gridSearchKFoldClassification(X_train, X_test, y_train, y_test, aScore = 'ro
   if aPreprocessor is None:
     myPreprocessor = ColumnTransformer(
       transformers=[
-        ('num', StandardScaler(), aNumericalColumns)
+        ('num', StandardScaler(), aNumericalColumns), 
       ],
       remainder='passthrough'
     )
   
-  myPipeline = Pipeline([('preprocessor', myPreprocessor), ('clf', XGBClassifier())])
+  myPipeline = Pipeline([('preprocessor', myPreprocessor), ('imputer', SimpleImputer(missing_values=np.nan, strategy='mean')), ('clf', XGBClassifier())])
   myGridSearchCv = GridSearchCV(myPipeline, aGrid, cv=kf, scoring=aScore, n_jobs=-1, verbose=0)
   myGridSearchCv.fit(X_train, y_train)
   myBestModel = myGridSearchCv.best_estimator_
   y_pred_proba = myBestModel.predict_proba(X_test)[:, 1]
   y_pred = myBestModel.predict(X_test)
   print(f'Best parameters: {myGridSearchCv.best_params_}')
-  print(f'Best cross val roc auc score: {myGridSearchCv.best_score_:.4f}')
-  print(f'Area under the receiver operating curve is {roc_auc_score(y_test, y_pred_proba):.4f}')
-  print(f'Accuracy score is {accuracy_score(y_test, y_pred):.4f}')
+  print(f'Best cross val {aScore} score: {myGridSearchCv.best_score_:.4f}')
+  print(f'Area under the receiver operating curve on test set is {roc_auc_score(y_test, y_pred_proba):.4f}')
+  print(f'Accuracy score on test set is {accuracy_score(y_test, y_pred):.4f}')
   return myGridSearchCv
 
 def getTopFeatures(aGridSearch, aColumnNames):
@@ -80,6 +81,45 @@ def getTopFeatures(aGridSearch, aColumnNames):
   plt.figure(figsize=(8, 8))
   sns.barplot(x = 'Importance', y= 'Feature', data=myTopFeatures)
   plt.title(f'Importances for {aGridSearch.best_params_}')
+  return myFeatureImportancesDf
+
+DefaulGridRegression = [
+  {
+    'clf': [XGBRegressor(), RandomForestRegressor()],
+    'clf__n_estimators': [5, 10, 200], 
+    'clf__max_depth': [2, 5, 10, None]
+  },
+  {
+    'clf': [KNeighborsRegressor()],
+    'clf__n_neighbors': [2, 5, 10],
+  },
+  {
+    'clf': [LogisticRegression(), SVR()],
+    'clf__C': [0.1, 1, 10]
+  }
+]
+
+def gridSearchKFoldRegression(X_train, X_test, y_train, y_test, aScore = 'r2', aGrid = DefaulGridRegression, aPreprocessor = None, aNumericalColumns = None):
+  kf = StratifiedKFold(n_splits=5, shuffle=True)
+  
+  myPreprocessor = aPreprocessor
+  if aPreprocessor is None:
+    myPreprocessor = ColumnTransformer(
+      transformers=[
+        ('num', StandardScaler(), aNumericalColumns),
+      ],
+      remainder='passthrough'
+    )
+  
+  myPipeline = Pipeline([('preprocessor', myPreprocessor), ('imputer', SimpleImputer(missing_values=np.nan, strategy='mean')), ('clf', XGBClassifier())])
+  myGridSearchCv = GridSearchCV(myPipeline, aGrid, cv=kf, scoring=aScore, n_jobs=-1, verbose=0)
+  myGridSearchCv.fit(X_train, y_train)
+  myBestModel = myGridSearchCv.best_estimator_
+  y_pred = myBestModel.predict(X_test)
+  print(f'Best parameters: {myGridSearchCv.best_params_}')
+  print(f'Best cross val {aScore} score: {myGridSearchCv.best_score_:.4f}')
+  print(f'R2 score  on test set: {r2_score(y_test, y_pred)}')
+  return myGridSearchCv
 
 def plotRocAucCuve(aGridSearchCv, X_test, y_test):
   myBestModel = aGridSearchCv.best_estimator_
