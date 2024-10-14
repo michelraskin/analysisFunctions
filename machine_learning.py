@@ -159,13 +159,13 @@ def getPredictedThirds(aDf):
   )
   return lower_third, upper_third, aDf
 
-def getPredictedTreatmentEffectSupervised(X_train, aModel):
+def getPredictedTreatmentEffectSupervisedClassif(X_train, aModel):
   myXValueModified1 = X_train.copy()
   myXValueModified1['groupe'] = 1.0
   myXValueModified2 = X_train.copy()
   myXValueModified2['groupe'] = 0.0
-  y_pred_proba1 = aModel.predict(myXValueModified1)
-  y_pred_proba2 = aModel.predict(myXValueModified2)
+  y_pred_proba1 = aModel.predict_proba(myXValueModified1)[:, 1]
+  y_pred_proba2 = aModel.predict_proba(myXValueModified2)[:, 1]
   myNewDf = pd.DataFrame()
   myNewDf['predicted_effect'] = (y_pred_proba1 - y_pred_proba2)
   lower_third, upper_third, myNewDf = getPredictedThirds(myNewDf)
@@ -178,21 +178,13 @@ def getPredictedTreatmentEffectSupervised(X_train, aModel):
       myFilter = myNewDf['predicted_effect_group'] == group
       plt.scatter(x = myNewDf[myFilter]['predicted_effect'].index, y = myNewDf[myFilter]['predicted_effect'])
     plt.legend(myNewDf['predicted_effect_group'].unique())
-  return myNewDf
+  return lower_third, upper_third, myNewDf
 
 def getTreatmentEffectDiff(X_train, y_train, aModel):
-  myNewDf = getPredictedTreatmentEffectSupervised(X_train, aModel)
-  lower_third = myNewDf['predicted_effect'].quantile(1/3)
-  upper_third = myNewDf['predicted_effect'].quantile(2/3)
+  lower_third, upper_third, myNewDf = getPredictedTreatmentEffectSupervisedClassif(X_train, aModel)
   if upper_third == lower_third:
     print(f'No effect difference')
     return 1
-  myNewDf['predicted_effect_third'] = pd.cut(
-    myNewDf['predicted_effect'],
-    bins=[-float('inf'), lower_third, upper_third, float('inf')],
-    labels=['Lower', 'Middle', 'Upper']
-  )
-
   myData = pd.concat([X_train['groupe'], myNewDf['predicted_effect_third'], y_train], axis=1)
   model1 = smf.logit(
     'CPC12 ~ predicted_effect_third + groupe',
