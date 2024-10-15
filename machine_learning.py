@@ -185,14 +185,14 @@ def getTreatmentEffectDiff(X_train, y_train, aModel):
   if upper_third == lower_third:
     print(f'No effect difference')
     return 1
-  myData = pd.concat([X_train['groupe'], myNewDf['predicted_effect_third'], y_train], axis=1)
+  myData = pd.concat([X_train['groupe'], myNewDf['predicted_effect_group'], y_train], axis=1)
   model1 = smf.logit(
-    'CPC12 ~ predicted_effect_third + groupe',
+    'CPC12 ~ predicted_effect_group + groupe',
     data=myData
   ).fit()
 
   model2 = smf.logit(
-    'CPC12 ~ predicted_effect_third * groupe',
+    'CPC12 ~ predicted_effect_group * groupe',
     data=myData
   ).fit()
 
