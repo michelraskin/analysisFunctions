@@ -52,7 +52,7 @@ def getDefaultPreprocessor(aNumericalColumns, aBinaryColumns):
         ('num', StandardScaler(), aNumericalColumns), 
         ('bin', 'passthrough', aBinaryColumns), 
       ],
-      remainder = OneHotEncoder(handle_unknown='ignore')
+      remainder = OneHotEncoder(handle_unknown='ignore', sparse_output=False)
     )
 
 def getDefaultPipelineSteps(X_train):
@@ -205,3 +205,80 @@ def getTreatmentEffectDiff(X_train, y_train, aModel):
   print(f'p-value: {p_value}')
   print(f'Degress of freedom: {df_diff}')
   return p_value
+
+def getTreatmentEffectDiffUnsupervised(aX, aY, aModel):
+  if hasattr(aModel, 'predict'):
+      aModel.fit(aX)
+      myGroups = aModel.predict(aX)
+  elif hasattr(aModel, 'fit_predict'):
+      myGroups = aModel.fit_predict(aX)
+  else:
+      print(f'Model prediction output not supported')
+  myNewDf = pd.DataFrame()
+  myNewDf['predicted_effect_group'] = myGroups
+  myData = pd.concat([aX['groupe'], myNewDf['predicted_effect_group'], aY], axis=1)
+  model1 = smf.logit(
+  'CPC12 ~ predicted_effect_group + groupe',
+  data=myData
+  ).fit()
+
+  model2 = smf.logit(
+  'CPC12 ~ predicted_effect_group * groupe',
+  data=myData
+  ).fit()
+
+  llr = -2*(model1.llf - model2.llf)
+  df_diff = model2.df_model - model1.df_model
+  p_value = chi2.sf(llr, df_diff)
+
+  print(f'Likelihood ratio of test results:')
+  print(f'Chi square statistic: {llr}')
+  print(f'p-value: {p_value}')
+  print(f'Degress of freedom: {df_diff}')
+  return p_value, model2, myData
+
+def plotPredictedEffectDiff(aData, aBestModel):
+  predicted_effect_groups = aData['predicted_effect_group'].unique()
+  predicted_effect_groups.sort()
+  groupe_values = aData['groupe'].unique()
+  groupe_values.sort()
+  groupe_values = list(filter(lambda x: not np.isnan(x), groupe_values))
+  
+  predicted_effect_groups = list(filter(lambda x: not np.isnan(x), predicted_effect_groups))
+
+  # Prepare the DataFrame for prediction
+  predictions = []
+  for groupe in groupe_values:
+      for effect in predicted_effect_groups:
+          temp_df = pd.DataFrame({
+              'predicted_effect_group': [effect],
+              'groupe': [groupe]
+          })
+          # Predict the probability
+          temp_df['predicted_prob'] = aBestModel.predict(temp_df)
+          predictions.append(temp_df)
+
+  # Concatenate all predictions
+  predictions_df = pd.concat(predictions)
+
+  # Create a bar plot
+  plt.figure(figsize=(8, 6))
+  for i, groupe in enumerate(groupe_values):
+      subset = predictions_df[predictions_df['groupe'] == groupe]
+      plt.bar(
+          subset['predicted_effect_group'] + (i * 0.2) - 0.1,  # Shift bars slightly for better visualization
+          subset['predicted_prob'],
+          width=0.2,
+          label=f'Groupe {groupe}'
+      )
+      
+  x_positions = np.arange(len(predicted_effect_groups)) 
+
+  plt.xticks(x_positions)
+  plt.xlabel('Predicted Effect Group')
+  plt.ylabel('Predicted Probability of CPC12')
+  plt.title('Predicted Probability of CPC12 by Predicted Effect Group and Groupe')
+  plt.legend(title='Groupe')
+  plt.grid(True, axis='y', linestyle='--', alpha=0.7)
+  plt.tight_layout()
+  plt.show()
