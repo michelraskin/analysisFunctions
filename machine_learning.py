@@ -207,36 +207,29 @@ def getTreatmentEffectDiff(X_train, y_train, aModel):
   print(f'Degress of freedom: {df_diff}')
   return p_value
 
-def getTreatmentEffectDiffUnsupervised(aX, aY, aModel):
-  if hasattr(aModel, 'predict'):
-      aModel.fit(aX)
-      myGroups = aModel.predict(aX)
-  elif hasattr(aModel, 'fit_predict'):
-      myGroups = aModel.fit_predict(aX)
-  else:
-      print(f'Model prediction output not supported')
-  myNewDf = pd.DataFrame()
-  myNewDf['predicted_effect_group'] = myGroups
-  myData = pd.concat([aX['groupe'], myNewDf['predicted_effect_group'], aY], axis=1)
-  model1 = smf.logit(
-  'CPC12 ~ predicted_effect_group + groupe',
-  data=myData
-  ).fit()
+def getTreatmentEffectDiffUnsupervised(aX, aY, aGroups, aCategory = 'CPC12'):
+    myNewDf = pd.DataFrame()
+    myNewDf['predicted_effect_group'] = aGroups
+    myData = pd.concat([aX['groupe'], myNewDf['predicted_effect_group'], aY], axis=1)
+    model1 = smf.logit(
+    f'{aCategory} ~ predicted_effect_group + groupe',
+    data=myData
+    ).fit()
 
-  model2 = smf.logit(
-  'CPC12 ~ predicted_effect_group * groupe',
-  data=myData
-  ).fit()
+    model2 = smf.logit(
+    f'{aCategory} ~ predicted_effect_group * groupe',
+    data=myData
+    ).fit()
 
-  llr = -2*(model1.llf - model2.llf)
-  df_diff = model2.df_model - model1.df_model
-  p_value = chi2.sf(llr, df_diff)
+    llr = -2*(model1.llf - model2.llf)
+    df_diff = model2.df_model - model1.df_model
+    p_value = chi2.sf(llr, df_diff)
 
-  print(f'Likelihood ratio of test results:')
-  print(f'Chi square statistic: {llr}')
-  print(f'p-value: {p_value}')
-  print(f'Degress of freedom: {df_diff}')
-  return p_value, model2, myData
+    print(f'Likelihood ratio of test results:')
+    print(f'Chi square statistic: {llr}')
+    print(f'p-value: {p_value}')
+    print(f'Degress of freedom: {df_diff}')
+    return p_value, model2, myData
 
 def plotPredictedEffectDiff(aData, aBestModel):
   predicted_effect_groups = aData['predicted_effect_group'].unique()
