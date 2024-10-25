@@ -28,6 +28,7 @@ from sklearn.inspection import permutation_importance
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 from scipy.stats import chi2
+from sklearn.decomposition import PCA
 
 DefaultGrid = [
   {
@@ -59,7 +60,7 @@ def getDefaultPipelineSteps(X_train):
   myNumericalColumns = X_train.columns[X_train.nunique() > 10]
   myBinaryColumns = X_train.columns[X_train.nunique() == 2]
   myPreprocessor = getDefaultPreprocessor(aNumericalColumns=myNumericalColumns, aBinaryColumns=myBinaryColumns)
-  return [('preprocessor', myPreprocessor), ('imputer', SimpleImputer(missing_values=np.nan, strategy='mean'))]
+  return [('preprocessor', myPreprocessor), ('imputer', SimpleImputer(missing_values=np.nan, strategy='mean')), ('pca', PCA(n_components=0.9))]
 
 def gridSearchKFoldClassification(X_train, X_test, y_train, y_test, aScore = 'roc_auc', aGrid = DefaultGrid):
   kf = StratifiedKFold(n_splits=10, shuffle=True)
