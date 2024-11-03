@@ -160,15 +160,7 @@ def getPredictedThirds(aDf):
     )
     return lower_third, upper_third, aDf
 
-def getPredictedTreatmentEffectSupervisedClassif(X_train, aModel):
-    myXValueModified1 = X_train.copy()
-    myXValueModified1['groupe'] = 1.0
-    myXValueModified2 = X_train.copy()
-    myXValueModified2['groupe'] = 0.0
-    y_pred_proba1 = aModel.predict_proba(myXValueModified1)[:, 1]
-    y_pred_proba2 = aModel.predict_proba(myXValueModified2)[:, 1]
-    myNewDf = pd.DataFrame()
-    myNewDf['predicted_effect'] = (y_pred_proba1 - y_pred_proba2)
+def plotPredictedTreatmentEffect(myNewDf, aCategory = 'CPC12'):
     lower_third, upper_third, myNewDf = getPredictedThirds(myNewDf)
     if lower_third == upper_third:
         plt.scatter(x = range(len(y_pred_proba1)), y = myNewDf['predicted_effect'].sort_values())
@@ -179,10 +171,27 @@ def getPredictedTreatmentEffectSupervisedClassif(X_train, aModel):
             myFilter = myNewDf['predicted_effect_group'] == group
             plt.scatter(x = myNewDf[myFilter]['predicted_effect'].index, y = myNewDf[myFilter]['predicted_effect'])
         plt.legend(myNewDf['predicted_effect_group'].unique())
+    plt.title(f'Predicted treatment effect diff between hypothermia and normothermia for {aCategory}')
     return lower_third, upper_third, myNewDf
 
+def getPredictedTreatmentEffectSupervisedClassif(X_train, aModel, aCategory):
+    myXValueModified1 = X_train.copy()
+    myXValueModified1['groupe'] = 1.0
+    myXValueModified2 = X_train.copy()
+    myXValueModified2['groupe'] = 0.0
+    if hasattr(aModel, 'predict_proba'):
+        y_pred_proba1 = aModel.predict_proba(myXValueModified1)[:, 1]
+        y_pred_proba2 = aModel.predict_proba(myXValueModified2)[:, 1]
+    else:
+        y_pred_proba1 = aModel.predict(myXValueModified1)
+        y_pred_proba2 = aModel.predict(myXValueModified2)
+    myNewDf = pd.DataFrame()
+    myNewDf['predicted_effect'] = (y_pred_proba1 - y_pred_proba2)
+    return plotPredictedTreatmentEffect(myNewDf=myNewDf, aCategory=aCategory)
+    
+
 def getTreatmentEffectDiff(X_train, y_train, aModel, aCategory = 'CPC12'):
-    lower_third, upper_third, myNewDf = getPredictedTreatmentEffectSupervisedClassif(X_train, aModel)
+    lower_third, upper_third, myNewDf = getPredictedTreatmentEffectSupervisedClassif(X_train, aModel, aCategory)
     if upper_third == lower_third:
         print(f'No effect difference')
         return 1
@@ -231,7 +240,7 @@ def getTreatmentEffectDiffUnsupervised(aX, aY, aGroups, aCategory = 'CPC12'):
         print(f'Degress of freedom: {df_diff}')
         return p_value, model2, myData
 
-def plotPredictedEffectDiff(aData, aBestModel):
+def plotPredictedEffectDiff(aData, aBestModel, aCategory = 'CPC12'):
     predicted_effect_groups = aData['predicted_effect_group'].unique()
     predicted_effect_groups.sort()
     groupe_values = aData['groupe'].unique()
@@ -270,8 +279,8 @@ def plotPredictedEffectDiff(aData, aBestModel):
 
     plt.xticks(x_positions)
     plt.xlabel('Predicted Effect Group')
-    plt.ylabel('Predicted Probability of CPC12')
-    plt.title('Predicted Probability of CPC12 by Predicted Effect Group and Groupe')
+    plt.ylabel(f'Predicted Probability of {aCategory}')
+    plt.title(f'Predicted Probability of {aCategory} by Predicted Effect Group and Groupe')
     plt.legend(title='Groupe')
     plt.grid(True, axis='y', linestyle='--', alpha=0.7)
     plt.tight_layout()
