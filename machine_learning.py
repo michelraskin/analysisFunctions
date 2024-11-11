@@ -60,7 +60,7 @@ def getDefaultPipelineSteps(X_train):
     myNumericalColumns = X_train.columns[X_train.nunique() > 10]
     myBinaryColumns = X_train.columns[X_train.nunique() == 2]
     myPreprocessor = getDefaultPreprocessor(aNumericalColumns=myNumericalColumns, aBinaryColumns=myBinaryColumns)
-    return [('preprocessor', myPreprocessor), ('imputer', SimpleImputer(missing_values=np.nan, strategy='mean')), ('pca', PCA(n_components=0.9))]
+    return [('preprocessor', myPreprocessor), ('imputer', SimpleImputer(missing_values=np.nan, strategy='mean')), ('pca', PCA(n_components=0.95))]
 
 def gridSearchKFoldClassification(X_train, X_test, y_train, y_test, aScore = 'roc_auc', aGrid = DefaultGrid):
     kf = StratifiedKFold(n_splits=10, shuffle=True)
