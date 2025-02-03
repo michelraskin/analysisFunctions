@@ -33,12 +33,12 @@ from sklearn.decomposition import PCA
 DefaultGrid = [
     {
         'clf': [XGBClassifier(eval_metric='logloss'), RandomForestClassifier()],
-        'clf__n_estimators': [5, 10, 50], 
-        'clf__max_depth': [2, 5, 10]
+        'clf__n_estimators': [5, 10, 50, 200], 
+        'clf__max_depth': [2, 5, 10, 25, None]
     },
     {
         'clf': [DecisionTreeClassifier()],
-        'clf__max_depth': [2, 5, 20],
+        'clf__max_depth': [2, 5, 20, 50, None],
         'clf__class_weight': [None, 'balanced']
     },
     {
@@ -57,10 +57,10 @@ def getDefaultPreprocessor(aNumericalColumns, aBinaryColumns):
         )
 
 def getDefaultPipelineSteps(X_train):
-    myNumericalColumns = X_train.columns[X_train.nunique() > 10]
+    myNumericalColumns = X_train.columns[(X_train.nunique() > 10) & (X_train.dtypes != object)]
     myBinaryColumns = X_train.columns[X_train.nunique() == 2]
     myPreprocessor = getDefaultPreprocessor(aNumericalColumns=myNumericalColumns, aBinaryColumns=myBinaryColumns)
-    return [('preprocessor', myPreprocessor), ('imputer', SimpleImputer(missing_values=np.nan, strategy='mean')), ('pca', PCA(n_components=0.95))]
+    return [('preprocessor', myPreprocessor), ('imputer', SimpleImputer(missing_values=np.nan, strategy='mean'))]#, ('pca', PCA(n_components=0.95))]
 
 def gridSearchKFoldClassification(X_train, X_test, y_train, y_test, aScore = 'roc_auc', aGrid = DefaultGrid):
     kf = StratifiedKFold(n_splits=10, shuffle=True)
@@ -174,11 +174,11 @@ def plotPredictedTreatmentEffect(myNewDf, aCategory = 'CPC12'):
     plt.title(f'Predicted treatment effect diff between hypothermia and normothermia for {aCategory}')
     return lower_third, upper_third, myNewDf
 
-def getPredictedTreatmentEffectSupervisedClassif(X_train, aModel, aCategory):
+def getPredictedTreatmentEffectSupervisedClassif(X_train, aModel, aCategory, aGroup):
     myXValueModified1 = X_train.copy()
-    myXValueModified1['groupe'] = 1.0
+    myXValueModified1[aGroup] = 1.0
     myXValueModified2 = X_train.copy()
-    myXValueModified2['groupe'] = 0.0
+    myXValueModified2[aGroup] = 0.0
     if hasattr(aModel, 'predict_proba'):
         y_pred_proba1 = aModel.predict_proba(myXValueModified1)[:, 1]
         y_pred_proba2 = aModel.predict_proba(myXValueModified2)[:, 1]
