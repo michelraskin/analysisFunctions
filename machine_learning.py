@@ -33,12 +33,12 @@ from sklearn.decomposition import PCA
 DefaultGrid = [
     {
         'clf': [XGBClassifier(eval_metric='logloss'), RandomForestClassifier()],
-        'clf__n_estimators': [5, 10, 50], 
-        'clf__max_depth': [2, 5, 10]
+        'clf__n_estimators': [5, 10, 50, 200], 
+        'clf__max_depth': [2, 5, 10, 25, None]
     },
     {
         'clf': [DecisionTreeClassifier()],
-        'clf__max_depth': [2, 5, 20],
+        'clf__max_depth': [2, 5, 20, 50, None],
         'clf__class_weight': [None, 'balanced']
     },
     {
@@ -57,17 +57,17 @@ def getDefaultPreprocessor(aNumericalColumns, aBinaryColumns):
         )
 
 def getDefaultPipelineSteps(X_train):
-    myNumericalColumns = X_train.columns[X_train.nunique() > 10]
+    myNumericalColumns = X_train.columns[(X_train.nunique() > 10) & (X_train.dtypes != object)]
     myBinaryColumns = X_train.columns[X_train.nunique() == 2]
     myPreprocessor = getDefaultPreprocessor(aNumericalColumns=myNumericalColumns, aBinaryColumns=myBinaryColumns)
-    return [('preprocessor', myPreprocessor), ('imputer', SimpleImputer(missing_values=np.nan, strategy='mean')), ('pca', PCA(n_components=0.95))]
+    return [('preprocessor', myPreprocessor), ('imputer', SimpleImputer(missing_values=np.nan, strategy='mean'))]#, ('pca', PCA(n_components=0.95))]
 
 def gridSearchKFoldClassification(X_train, X_test, y_train, y_test, aScore = 'roc_auc', aGrid = DefaultGrid):
     kf = StratifiedKFold(n_splits=10, shuffle=True)
     myPipelineSteps = getDefaultPipelineSteps(X_train = X_train)
     myPipelineSteps.append(('clf', XGBClassifier()))
     myPipeline = Pipeline(myPipelineSteps)
-    myGridSearchCv = GridSearchCV(myPipeline, aGrid, cv=kf, scoring=aScore, n_jobs=-1, verbose=0)
+    myGridSearchCv = GridSearchCV(myPipeline, aGrid, cv=kf, scoring=aScore, n_jobs=-1, verbose=3)
     myGridSearchCv.fit(X_train, y_train)
     myBestModel = myGridSearchCv.best_estimator_
     y_pred_proba = myBestModel.predict_proba(X_test)[:, 1]
@@ -195,7 +195,7 @@ def getTreatmentEffectDiff(X_train, y_train, aModel, aCategory = 'CPC12', aGroup
     if upper_third == lower_third:
         print(f'No effect difference')
         return 1
-    myData = pd.concat([X_train[aGroup], myNewDf['predicted_effect_group'], y_train], axis=1)
+    myData = pd.concat([X_train[aGroup].reset_index(), myNewDf['predicted_effect_group'].reset_index(), y_train.reset_index()], axis=1)
     model1 = smf.logit(
         f'{aCategory} ~ predicted_effect_group + {aGroup}',
         data=myData
@@ -219,7 +219,7 @@ def getTreatmentEffectDiff(X_train, y_train, aModel, aCategory = 'CPC12', aGroup
 def getTreatmentEffectDiffUnsupervised(aX, aY, aGroups, aCategory = 'CPC12', aGroup = 'groupe'):
         myNewDf = pd.DataFrame()
         myNewDf['predicted_effect_group'] = aGroups
-        myData = pd.concat([aX[aGroup], myNewDf['predicted_effect_group'], aY], axis=1)
+        myData = pd.concat([aX[aGroup].reset_index(), myNewDf['predicted_effect_group'].reset_index(), aY.reset_index()], axis=1)
         model1 = smf.logit(
         f'{aCategory} ~ predicted_effect_group + {aGroup}',
         data=myData
