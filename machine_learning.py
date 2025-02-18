@@ -190,19 +190,19 @@ def getPredictedTreatmentEffectSupervisedClassif(X_train, aModel, aCategory, aGr
     return plotPredictedTreatmentEffect(myNewDf=myNewDf, aCategory=aCategory)
     
 
-def getTreatmentEffectDiff(X_train, y_train, aModel, aCategory = 'CPC12'):
-    lower_third, upper_third, myNewDf = getPredictedTreatmentEffectSupervisedClassif(X_train, aModel, aCategory)
+def getTreatmentEffectDiff(X_train, y_train, aModel, aCategory = 'CPC12', aGroup = 'groupe'):
+    lower_third, upper_third, myNewDf = getPredictedTreatmentEffectSupervisedClassif(X_train, aModel, aCategory, aGroup)
     if upper_third == lower_third:
         print(f'No effect difference')
         return 1
-    myData = pd.concat([X_train['groupe'].reset_index(), myNewDf['predicted_effect_group'].reset_index(), y_train.reset_index()], axis=1)
+    myData = pd.concat([X_train[aGroup].reset_index(), myNewDf['predicted_effect_group'].reset_index(), y_train.reset_index()], axis=1)
     model1 = smf.logit(
-        f'{aCategory} ~ predicted_effect_group + groupe',
+        f'{aCategory} ~ predicted_effect_group + {aGroup}',
         data=myData
     ).fit()
 
     model2 = smf.logit(
-        f'{aCategory} ~ predicted_effect_group * groupe',
+        f'{aCategory} ~ predicted_effect_group * {aGroup}',
         data=myData
     ).fit()
 
@@ -216,17 +216,17 @@ def getTreatmentEffectDiff(X_train, y_train, aModel, aCategory = 'CPC12'):
     print(f'Degress of freedom: {df_diff}')
     return p_value
 
-def getTreatmentEffectDiffUnsupervised(aX, aY, aGroups, aCategory = 'CPC12'):
+def getTreatmentEffectDiffUnsupervised(aX, aY, aGroups, aCategory = 'CPC12', aGroup = 'groupe'):
         myNewDf = pd.DataFrame()
         myNewDf['predicted_effect_group'] = aGroups
-        myData = pd.concat([aX['groupe'], myNewDf['predicted_effect_group'], aY], axis=1)
+        myData = pd.concat([aX[aGroup].reset_index(), myNewDf['predicted_effect_group'].reset_index(), aY.reset_index()], axis=1)
         model1 = smf.logit(
-        f'{aCategory} ~ predicted_effect_group + groupe',
+        f'{aCategory} ~ predicted_effect_group + {aGroup}',
         data=myData
         ).fit()
 
         model2 = smf.logit(
-        f'{aCategory} ~ predicted_effect_group * groupe',
+        f'{aCategory} ~ predicted_effect_group * {aGroup}',
         data=myData
         ).fit()
 
@@ -240,10 +240,10 @@ def getTreatmentEffectDiffUnsupervised(aX, aY, aGroups, aCategory = 'CPC12'):
         print(f'Degress of freedom: {df_diff}')
         return p_value, model2, myData
 
-def plotPredictedEffectDiff(aData, aBestModel, aCategory = 'CPC12'):
+def plotPredictedEffectDiff(aData, aBestModel, aCategory = 'CPC12', aGroup = 'groupe'):
     predicted_effect_groups = aData['predicted_effect_group'].unique()
     predicted_effect_groups.sort()
-    groupe_values = aData['groupe'].unique()
+    groupe_values = aData[aGroup].unique()
     groupe_values.sort()
     groupe_values = list(filter(lambda x: not np.isnan(x), groupe_values))
     
