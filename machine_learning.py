@@ -67,7 +67,7 @@ def gridSearchKFoldClassification(X_train, X_test, y_train, y_test, aScore = 'ro
     myPipelineSteps = getDefaultPipelineSteps(X_train = X_train)
     myPipelineSteps.append(('clf', XGBClassifier()))
     myPipeline = Pipeline(myPipelineSteps)
-    myGridSearchCv = GridSearchCV(myPipeline, aGrid, cv=kf, scoring=aScore, n_jobs=-1, verbose=0)
+    myGridSearchCv = GridSearchCV(myPipeline, aGrid, cv=kf, scoring=aScore, n_jobs=-1, verbose=3)
     myGridSearchCv.fit(X_train, y_train)
     myBestModel = myGridSearchCv.best_estimator_
     y_pred_proba = myBestModel.predict_proba(X_test)[:, 1]
@@ -195,7 +195,7 @@ def getTreatmentEffectDiff(X_train, y_train, aModel, aCategory = 'CPC12'):
     if upper_third == lower_third:
         print(f'No effect difference')
         return 1
-    myData = pd.concat([X_train['groupe'], myNewDf['predicted_effect_group'], y_train], axis=1)
+    myData = pd.concat([X_train['groupe'].reset_index(), myNewDf['predicted_effect_group'].reset_index(), y_train.reset_index()], axis=1)
     model1 = smf.logit(
         f'{aCategory} ~ predicted_effect_group + groupe',
         data=myData
