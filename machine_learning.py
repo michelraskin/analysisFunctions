@@ -16,7 +16,7 @@ from xgboost import XGBClassifier, XGBRegressor, plot_tree, plot_importance, to_
 from sklearn.pipeline import Pipeline
 from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 from sklearn.linear_model import LogisticRegression
-from sklearn.impute import SimpleImputer
+from sklearn.impute import SimpleImputer, KNNImputer
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from graphviz import Source
@@ -29,6 +29,9 @@ import statsmodels.api as sm
 import statsmodels.formula.api as smf
 from scipy.stats import chi2
 from sklearn.decomposition import PCA
+import pandas as pd
+import statsmodels.formula.api as smf
+from scipy.stats import f
 
 DefaultGrid = [
     {
@@ -57,13 +60,13 @@ def getDefaultPreprocessor(aNumericalColumns, aBinaryColumns):
         )
 
 def getDefaultPipelineSteps(X_train):
-    myNumericalColumns = X_train.columns[(X_train.nunique() > 10) & (X_train.dtypes != object)]
+    myNumericalColumns = X_train.columns[(X_train.nunique() > 5) & (X_train.dtypes != object)]
     myBinaryColumns = X_train.columns[X_train.nunique() == 2]
     myPreprocessor = getDefaultPreprocessor(aNumericalColumns=myNumericalColumns, aBinaryColumns=myBinaryColumns)
-    return [('preprocessor', myPreprocessor), ('imputer', SimpleImputer(missing_values=np.nan, strategy='mean'))]#, ('pca', PCA(n_components=0.95))]
+    return [('preprocessor', myPreprocessor), ('imputer', KNNImputer(n_neighbors=10))]
 
 def gridSearchKFoldClassification(X_train, X_test, y_train, y_test, aScore = 'roc_auc', aGrid = DefaultGrid):
-    kf = StratifiedKFold(n_splits=10, shuffle=True)
+    kf = StratifiedKFold(n_splits=5, shuffle=True)
     myPipelineSteps = getDefaultPipelineSteps(X_train = X_train)
     myPipelineSteps.append(('clf', XGBClassifier()))
     myPipeline = Pipeline(myPipelineSteps)
@@ -163,21 +166,21 @@ def getPredictedThirds(aDf):
 def plotPredictedTreatmentEffect(myNewDf, aCategory = 'CPC12'):
     lower_third, upper_third, myNewDf = getPredictedThirds(myNewDf)
     if lower_third == upper_third:
-        plt.scatter(x = range(len(y_pred_proba1)), y = myNewDf['predicted_effect'].sort_values())
+        plt.scatter(x = range(len(myNewDf.shape[0])), y = myNewDf['predicted_effect'].sort_values())
     else:
         myNewDf.sort_values(['predicted_effect'], inplace=True)
         myNewDf.reset_index(inplace=True)
-        for group in myNewDf['predicted_effect_group']:
+        for group in myNewDf['predicted_effect_group'].unique():
             myFilter = myNewDf['predicted_effect_group'] == group
             plt.scatter(x = myNewDf[myFilter]['predicted_effect'].index, y = myNewDf[myFilter]['predicted_effect'])
         plt.legend(myNewDf['predicted_effect_group'].unique())
     plt.title(f'Predicted treatment effect diff between hypothermia and normothermia for {aCategory}')
     return lower_third, upper_third, myNewDf
 
-def getPredictedTreatmentEffectSupervisedClassif(X_train, aModel, aCategory, aGroup):
-    myXValueModified1 = X_train.copy()
+def getPredictedTreatmentEffectSupervisedClassif(aX, aModel, aCategory, aGroup, aUseNeuralNetwork):
+    myXValueModified1 = aX.copy()
     myXValueModified1[aGroup] = 1.0
-    myXValueModified2 = X_train.copy()
+    myXValueModified2 = aX.copy()
     myXValueModified2[aGroup] = 0.0
     if hasattr(aModel, 'predict_proba'):
         y_pred_proba1 = aModel.predict_proba(myXValueModified1)[:, 1]
@@ -185,60 +188,87 @@ def getPredictedTreatmentEffectSupervisedClassif(X_train, aModel, aCategory, aGr
     else:
         y_pred_proba1 = aModel.predict(myXValueModified1)
         y_pred_proba2 = aModel.predict(myXValueModified2)
+        if (aUseNeuralNetwork):
+            y_pred_proba1 = y_pred_proba1.T[0, :]
+            y_pred_proba2 = y_pred_proba2.T[0, :]
     myNewDf = pd.DataFrame()
     myNewDf['predicted_effect'] = (y_pred_proba1 - y_pred_proba2)
     return plotPredictedTreatmentEffect(myNewDf=myNewDf, aCategory=aCategory)
-    
 
-def getTreatmentEffectDiff(X_train, y_train, aModel, aCategory = 'CPC12', aGroup = 'groupe'):
-    lower_third, upper_third, myNewDf = getPredictedTreatmentEffectSupervisedClassif(X_train, aModel, aCategory, aGroup)
-    if upper_third == lower_third:
-        print(f'No effect difference')
-        return 1
-    myData = pd.concat([X_train[aGroup].reset_index(), myNewDf['predicted_effect_group'].reset_index(), y_train.reset_index()], axis=1)
-    model1 = smf.logit(
-        f'{aCategory} ~ predicted_effect_group + {aGroup}',
+def getTreatmentEffectDiffDataFrame(aX, aY, aNewDf, aCategory = 'CPC12', aGroup = 'groupe', aByGroup = False):
+    if aX.shape[0] != aY.shape[0]:
+        raise Exception('Mismatch X and Y')
+    if aX.shape[0] != aNewDf.shape[0]:
+        raise Exception('Mismatch group and X')
+    mySplitColumn = 'predicted_effect'
+    if (aByGroup):
+        mySplitColumn = 'predicted_effect_group'
+    myData = pd.concat([aX.reset_index(), aNewDf[mySplitColumn].reset_index(), aY.reset_index()], axis=1)
+    myData['TreatmentColumn'] = myData[aGroup]
+    myNoInteractionModel = smf.logit(
+        f'{aCategory} ~ {mySplitColumn} + TreatmentColumn',
         data=myData
     ).fit()
 
-    model2 = smf.logit(
-        f'{aCategory} ~ predicted_effect_group * {aGroup}',
+    myInteractionModel = smf.logit(
+        f'{aCategory} ~ {mySplitColumn} * TreatmentColumn',
         data=myData
     ).fit()
 
-    llr = -2*(model1.llf - model2.llf)
-    df_diff = model2.df_model - model1.df_model
+    llr = -2*(myNoInteractionModel.llf - myInteractionModel.llf)
+    df_diff = myInteractionModel.df_model - myNoInteractionModel.df_model
     p_value = chi2.sf(llr, df_diff)
 
     print(f'Likelihood ratio of test results:')
     print(f'Chi square statistic: {llr}')
     print(f'p-value: {p_value}')
     print(f'Degress of freedom: {df_diff}')
+    print(f'No interaction {myNoInteractionModel.summary()}')
+    print(f'Interaction {myInteractionModel.summary()}')
     return p_value
 
+def getTreatmentEffectDiff(aX, aY, aModel, aCategory = 'CPC12', aGroup = 'groupe', aUseNeuralNetwork = False, aByGroup = False):
+    lower_third, upper_third, myNewDf = getPredictedTreatmentEffectSupervisedClassif(aX, aModel, aCategory, aGroup, aUseNeuralNetwork)
+    if upper_third == lower_third:
+        print(f'No effect difference')
+        return 1
+    return getTreatmentEffectDiffDataFrame(aX = aX, aY = aY, aNewDf = myNewDf, aCategory = aCategory, aGroup = aGroup, aByGroup = aByGroup)
+
 def getTreatmentEffectDiffUnsupervised(aX, aY, aGroups, aCategory = 'CPC12', aGroup = 'groupe'):
-        myNewDf = pd.DataFrame()
-        myNewDf['predicted_effect_group'] = aGroups
-        myData = pd.concat([aX[aGroup].reset_index(), myNewDf['predicted_effect_group'].reset_index(), aY.reset_index()], axis=1)
-        model1 = smf.logit(
+    myNewDf = pd.DataFrame()
+    myNewDf['predicted_effect_group'] = aGroups
+    return getTreatmentEffectDiffDataFrame(aX = aX, aY = aY, aNewDf = myNewDf, aCategory = aCategory, aGroup = aGroup, aByGroup = True)
+
+
+def getTreatmentEffectDiffRegression(aX, aY, myNewDf, aCategory='CPC12', aGroup='groupe'):
+    # Combine the relevant data into one DataFrame
+    myData = pd.concat([aX[aGroup].reset_index(), myNewDf['predicted_effect_group'].reset_index(), aY.reset_index()], axis=1)
+    myData = myData.rename(columns={aY.name: aCategory})  # Ensure the target column is named consistently
+
+    # Fit the reduced model (without interaction term)
+    myNoInteractionModel = smf.ols(
         f'{aCategory} ~ predicted_effect_group + {aGroup}',
         data=myData
-        ).fit()
+    ).fit()
 
-        model2 = smf.logit(
+    # Fit the full model (with interaction term)
+    myInteractionModel = smf.ols(
         f'{aCategory} ~ predicted_effect_group * {aGroup}',
         data=myData
-        ).fit()
+    ).fit()
 
-        llr = -2*(model1.llf - model2.llf)
-        df_diff = model2.df_model - model1.df_model
-        p_value = chi2.sf(llr, df_diff)
+    # Perform an F-test to compare the models
+    f_stat = (myNoInteractionModel.ssr - model2.ssr) / (myInteractionModel.df_model - myNoInteractionModel.df_model) / (myInteractionModel.ssr / myInteractionModel.df_resid)
+    df_diff = myInteractionModel.df_model - myNoInteractionModel.df_model
+    p_value = f.sf(f_stat, df_diff, model2.df_resid)
 
-        print(f'Likelihood ratio of test results:')
-        print(f'Chi square statistic: {llr}')
-        print(f'p-value: {p_value}')
-        print(f'Degress of freedom: {df_diff}')
-        return p_value, model2, myData
+    print(f'Likelihood ratio of test results (F-test for regression):')
+    print(f'F-statistic: {f_stat}')
+    print(f'p-value: {p_value}')
+    print(f'Degrees of freedom: {df_diff}')
+    print(f'No interaction {myNoInteractionModel.summary()}')
+    print(f'Interaction {myInteractionModel.summary()}')
+    return p_value
 
 def plotPredictedEffectDiff(aData, aBestModel, aCategory = 'CPC12', aGroup = 'groupe'):
     predicted_effect_groups = aData['predicted_effect_group'].unique()
